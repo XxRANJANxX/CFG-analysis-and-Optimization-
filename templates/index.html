@@ -1,1 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CFG Analyzer — Control Flow Graph Dashboard</title>
+  <meta name="description" content="Interactive web dashboard for C Control Flow Graph analysis, optimization, and live variable analysis." />
 
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Nunito+Sans:wght@300;400;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+  <!-- CodeMirror -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/dracula.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/clike/clike.min.js"></script>
+
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+<!-- ═══════════════════════════ NAVBAR ═══════════════════════════════════ -->
+<nav class="navbar">
+  <div class="navbar-brand">
+    <div class="brand-icon"><span>⟨/⟩</span></div>
+    <div class="brand-text">
+      <div class="brand-title">CFG Analyzer</div>
+      <div class="brand-sub">Control Flow Graph Dashboard</div>
+    </div>
+  </div>
+
+  <div class="navbar-center">
+    <span class="nav-pill">pycparser</span>
+    <span class="nav-sep">·</span>
+    <span class="nav-pill">networkx</span>
+    <span class="nav-sep">·</span>
+    <span class="nav-pill">Flask</span>
+  </div>
+
+  <div class="navbar-right">
+    <div class="nav-status-dot" id="status-dot"></div>
+    <div class="navbar-status" id="nav-status">Ready</div>
+  </div>
+</nav>
+
+<!-- ═══════════════════════════ LAYOUT ═══════════════════════════════════ -->
+<div class="layout">
+
+  <!-- ──────────── SIDEBAR ──────────── -->
+  <aside class="sidebar">
+
+    <!-- Tab switcher -->
+    <div class="tab-switcher">
+      <button class="tab-btn active" id="tab-custom-btn" onclick="switchInputTab('custom')">
+        <span class="tab-icon">✏</span> Custom Code
+      </button>
+      <button class="tab-btn" id="tab-dataset-btn" onclick="switchInputTab('dataset')">
+        <span class="tab-icon">⊞</span> Datasets
+      </button>
+    </div>
+
+    <!-- ── Custom Code Panel ── -->
+    <div id="panel-custom" class="input-panel">
+      <div class="panel-label">C Source Code</div>
+      <div class="editor-wrapper">
+        <textarea id="code-editor">/* Simple C example — no #include needed */
+int main() {
+    int x = 10;
+    int y = 20;
+    int z = x + y;
+    int dead = 99;
+    int result = z * 2;
+    return result;
+}</textarea>
+      </div>
+      <div class="editor-hint">Skip <code>#include</code> headers for simple programs · <kbd>Ctrl+Enter</kbd> to run</div>
+      <button class="analyze-btn" id="analyze-custom-btn" onclick="analyzeCustom()">
+        <span class="btn-arrow">▶</span> Analyze Code
+      </button>
+    </div>
+
+    <!-- ── Dataset Panel ── -->
+    <div id="panel-dataset" class="input-panel hidden">
+      <div class="panel-label">Choose a Dataset File</div>
+      <div id="dataset-grid" class="dataset-grid">
+        <div class="loading-dots"><span></span><span></span><span></span></div>
+      </div>
+      <button class="analyze-btn" id="analyze-dataset-btn" onclick="analyzeDataset()" disabled>
+        <span class="btn-arrow">▶</span> Analyze Selected
+      </button>
+    </div>
+
+    <!-- Pipeline steps legend -->
+    <div class="pipeline-legend">
+      <div class="legend-title">Pipeline</div>
+      <div class="legend-steps">
+        <div class="legend-step"><span class="step-num">01</span><span>Parse AST with pycparser</span></div>
+        <div class="legend-step"><span class="step-num">02</span><span>Build CFG with networkx</span></div>
+        <div class="legend-step"><span class="step-num">03</span><span>Live Variable Analysis</span></div>
+        <div class="legend-step"><span class="step-num">04</span><span>Constant Folding / Prop</span></div>
+        <div class="legend-step"><span class="step-num">05</span><span>Loop-Invariant Code Motion</span></div>
+        <div class="legend-step"><span class="step-num">06</span><span>Dead Code Elimination</span></div>
+        <div class="legend-step"><span class="step-num">07</span><span>Unreachable Code Removal</span></div>
+        <div class="legend-step"><span class="step-num">08</span><span>Taint Analysis</span></div>
+      </div>
+    </div>
+
+  </aside>
+
+  <!-- ──────────── MAIN CONTENT ──────────── -->
+  <main class="main-content">
+
+    <!-- Welcome screen -->
+    <div id="welcome-screen" class="welcome-screen">
+      <div class="welcome-inner">
+        <div class="welcome-diagram">
+          <div class="wd-row">
+            <div class="wd-node wd-entry">ENTRY</div>
+          </div>
+          <div class="wd-arrow">↓</div>
+          <div class="wd-row">
+            <div class="wd-node wd-block">B<sub>0</sub></div>
+          </div>
+          <div class="wd-fork">
+            <div class="wd-line"></div>
+            <div class="wd-fork-mid">
+              <div class="wd-fork-left">↙</div>
+              <div class="wd-fork-right">↘</div>
+            </div>
+            <div class="wd-fork-nodes">
+              <div class="wd-node wd-block">B<sub>1</sub></div>
+              <div class="wd-node wd-block">B<sub>2</sub></div>
+            </div>
+          </div>
+          <div class="wd-arrow wd-merge">↘&nbsp;&nbsp;↙</div>
+          <div class="wd-row">
+            <div class="wd-node wd-exit">EXIT</div>
+          </div>
+        </div>
+        <div class="welcome-copy">
+          <h1 class="welcome-title">Visualize &amp; Optimize<br/>Control Flow Graphs</h1>
+          <p class="welcome-sub">
+            Paste C code or pick a dataset on the left. The pipeline builds your CFG,
+            runs live-variable analysis, applies compiler optimizations, and detects
+            security taint flows — all in one click.
+          </p>
+          <div class="welcome-tags">
+            <span class="wtag">CFG Before &amp; After</span>
+            <span class="wtag">Live Variable Sets</span>
+            <span class="wtag">4 Optimization Passes</span>
+            <span class="wtag">Taint / Security Scan</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Loading overlay -->
+    <div id="loading-screen" class="loading-screen hidden">
+      <div class="loading-inner">
+        <div class="loading-ring">
+          <svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="16" fill="none" stroke-width="3"/></svg>
+        </div>
+        <div class="loading-label">Running pipeline</div>
+        <div class="loading-steps" id="loading-steps-list">
+          <div class="lstep">Parsing C source</div>
+          <div class="lstep">Building CFG</div>
+          <div class="lstep">Live variable analysis</div>
+          <div class="lstep">Optimising</div>
+          <div class="lstep">Rendering graphs</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ────── RESULTS ────── -->
+    <div id="results" class="results hidden">
+
+      <!-- Stats bar -->
+      <div class="stats-bar">
+        <div class="stat-card" id="stat-nodes">
+          <div class="stat-label">Blocks</div>
+          <div class="stat-value"><span id="sv-nodes-b">–</span><span class="stat-arrow">→</span><span id="sv-nodes-a">–</span></div>
+        </div>
+        <div class="stat-divider"></div>
+        <div class="stat-card" id="stat-edges">
+          <div class="stat-label">Edges</div>
+          <div class="stat-value"><span id="sv-edges-b">–</span><span class="stat-arrow">→</span><span id="sv-edges-a">–</span></div>
+        </div>
+        <div class="stat-divider"></div>
+        <div class="stat-card" id="stat-instrs">
+          <div class="stat-label">Instructions Eliminated</div>
+          <div class="stat-value" id="sv-instrs-elim">–</div>
+        </div>
+        <div class="stat-divider"></div>
+        <div class="stat-card" id="stat-taint">
+          <div class="stat-label">Taint Warnings</div>
+          <div class="stat-value" id="sv-taint">–</div>
+        </div>
+      </div>
+
+      <!-- CFG side-by-side viewer -->
+      <div class="cfg-section">
+        <div class="cfg-card" id="cfg-before">
+          <div class="cfg-card-header">
+            <span class="cfg-badge badge-before">BEFORE</span>
+            <span class="cfg-card-title">Initial Control Flow Graph</span>
+            <button class="zoom-btn" onclick="openLightbox('before')" title="Zoom in">⤢</button>
+          </div>
+          <div class="cfg-img-wrap">
+            <img id="before-img" alt="CFG before optimization" />
+          </div>
+        </div>
+        <div class="cfg-card" id="cfg-after">
+          <div class="cfg-card-header">
+            <span class="cfg-badge badge-after">AFTER</span>
+            <span class="cfg-card-title">Optimized Control Flow Graph</span>
+            <button class="zoom-btn" onclick="openLightbox('after')" title="Zoom in">⤢</button>
+          </div>
+          <div class="cfg-img-wrap">
+            <img id="after-img" alt="CFG after optimization" />
+          </div>
+        </div>
+      </div>
+
+      <!-- Analysis tabs -->
+      <div class="analysis-section">
+        <div class="atab-header">
+          <button class="atab-btn active" data-atab="live-var"      onclick="switchAnalysisTab(this,'live-var')">📊 Live Variables</button>
+          <button class="atab-btn"        data-atab="optimizations" onclick="switchAnalysisTab(this,'optimizations')">⚡ Optimizations</button>
+          <button class="atab-btn"        data-atab="taint"         onclick="switchAnalysisTab(this,'taint')">🔒 Taint Analysis</button>
+        </div>
+
+        <!-- Live Variable Analysis -->
+        <div id="atab-live-var" class="atab-content active">
+          <div class="table-scroll">
+            <table class="lv-table">
+              <thead>
+                <tr>
+                  <th>Block</th>
+                  <th>Instructions</th>
+                  <th class="set-col use-col">USE</th>
+                  <th class="set-col def-col">DEF</th>
+                  <th class="set-col in-col">IN</th>
+                  <th class="set-col out-col">OUT</th>
+                </tr>
+              </thead>
+              <tbody id="lv-table-body"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Optimizations -->
+        <div id="atab-optimizations" class="atab-content">
+          <div class="opt-grid">
+            <div class="opt-card" id="opt-cf">
+              <div class="opt-card-header">
+                <span class="opt-icon">🔢</span>
+                <div class="opt-titles">
+                  <div class="opt-title">Constant Folding &amp; Propagation</div>
+                  <div class="opt-sub">Evaluate compile-time constants</div>
+                </div>
+                <span class="opt-badge" id="badge-cf">0</span>
+              </div>
+              <div class="opt-items" id="items-cf"><div class="opt-empty">No changes</div></div>
+            </div>
+            <div class="opt-card" id="opt-licm">
+              <div class="opt-card-header">
+                <span class="opt-icon">🔄</span>
+                <div class="opt-titles">
+                  <div class="opt-title">Loop-Invariant Code Motion</div>
+                  <div class="opt-sub">Hoist loop-independent ops out</div>
+                </div>
+                <span class="opt-badge" id="badge-licm">0</span>
+              </div>
+              <div class="opt-items" id="items-licm"><div class="opt-empty">No changes</div></div>
+            </div>
+            <div class="opt-card" id="opt-dce">
+              <div class="opt-card-header">
+                <span class="opt-icon">🗑</span>
+                <div class="opt-titles">
+                  <div class="opt-title">Dead Code Elimination</div>
+                  <div class="opt-sub">Remove unused assignments</div>
+                </div>
+                <span class="opt-badge" id="badge-dce">0</span>
+              </div>
+              <div class="opt-items" id="items-dce"><div class="opt-empty">No changes</div></div>
+            </div>
+            <div class="opt-card" id="opt-unreach">
+              <div class="opt-card-header">
+                <span class="opt-icon">✂</span>
+                <div class="opt-titles">
+                  <div class="opt-title">Unreachable Block Removal</div>
+                  <div class="opt-sub">Drop disconnected CFG nodes</div>
+                </div>
+                <span class="opt-badge" id="badge-unreach">0</span>
+              </div>
+              <div class="opt-items" id="items-unreach"><div class="opt-empty">No changes</div></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Taint Analysis -->
+        <div id="atab-taint" class="atab-content">
+          <div id="taint-content"></div>
+        </div>
+
+      </div><!-- /analysis-section -->
+    </div><!-- /results -->
+
+  </main>
+</div><!-- /layout -->
+
+<!-- ═══════════════════════ LIGHTBOX ═════════════════════════════════════ -->
+<div id="lightbox" class="lightbox hidden" onclick="closeLightbox()">
+  <button class="lightbox-close" onclick="closeLightbox()">✕</button>
+  <div class="lightbox-inner" onclick="event.stopPropagation()">
+    <img id="lightbox-img" alt="CFG zoomed view" />
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
